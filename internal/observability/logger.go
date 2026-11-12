@@ -1,0 +1,12 @@
+package observability
+
+import (
+	"io"
+	"log/slog"
+)
+
+func NewLogger(level slog.Level, output io.Writer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{
+		Level: level,
+	}))
+}
