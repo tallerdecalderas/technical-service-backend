@@ -11,10 +11,13 @@ import (
 	googleadapter "technical-service-backend/internal/adapters/google"
 	httpadapter "technical-service-backend/internal/adapters/http"
 	"technical-service-backend/internal/adapters/postgres"
+	storageadapter "technical-service-backend/internal/adapters/storage"
 	"technical-service-backend/internal/adapters/supabase"
 	"technical-service-backend/internal/application"
 	"technical-service-backend/internal/config"
+	"technical-service-backend/internal/domain"
 	"technical-service-backend/internal/observability"
+	"technical-service-backend/internal/ports/outbound"
 )
 
 func main() {
@@ -77,10 +80,35 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	settlementRepository := postgres.NewSettlementRepository(pool, cfg.DatabaseQueryTimeout)
 	settlementService := application.NewSettlementUseCases(settlementRepository)
 	idempotencyRepository := postgres.NewIdempotencyRepository(pool, cfg.DatabaseQueryTimeout)
-	handler := httpadapter.NewHandlerWithPhase6Complete(
+
+	var storageAdapter outbound.ObjectStorage
+	var fileStore outbound.FileStore
+
+	switch cfg.Storage.Provider {
+	case domain.StorageProviderR2:
+		r2Adapter, err := storageadapter.NewR2Adapter(
+			cfg.Storage.R2Endpoint, cfg.Storage.R2Bucket,
+			cfg.Storage.R2AccessKeyID, cfg.Storage.R2SecretKey, cfg.Storage.R2Region, logger,
+		)
+		if err != nil {
+			return fmt.Errorf("create R2 storage adapter: %w", err)
+		}
+		storageAdapter = r2Adapter
+	default:
+		localAdapter := storageadapter.NewLocalAdapter(cfg.Storage.LocalDir, logger)
+		storageAdapter = localAdapter
+		fileStore = localAdapter
+	}
+
+	storedObjectRepository := postgres.NewStoredObjectRepository(pool, cfg.DatabaseQueryTimeout)
+	storageSvc := application.NewStorageUseCases(storageAdapter, storedObjectRepository, logger)
+
+	handler := httpadapter.NewHandlerWithPhase7(
 		pool, cfg.CORSAllowedOrigins, authService, clientService, technicianService,
 		serviceService, paymentService, estimateService, servicePartService,
 		expenseService, catalogService, catalogAdminService, catalogImportService, settlementService,
+		storageSvc, cfg.Storage,
+		fileStore,
 		cfg.Auth, logger, idempotencyRepository,
 	)
 	server := httpadapter.NewServer(cfg.APIPort, handler)

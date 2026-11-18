@@ -23,7 +23,18 @@ type Config struct {
 	CORSAllowedOrigins      []string
 	Auth                    AuthConfig
 	GoogleSheets            GoogleSheetsConfig
+	Storage                 StorageConfig
 	LogLevel                slog.Level
+}
+
+type StorageConfig struct {
+	Provider      string
+	LocalDir      string
+	R2Endpoint    string
+	R2Bucket      string
+	R2AccessKeyID string
+	R2SecretKey   string
+	R2Region      string
 }
 
 type GoogleSheetsConfig struct {
@@ -106,6 +117,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	storage, err := storageConfig(environment)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Environment:             environment,
 		APIPort:                 port,
@@ -123,8 +139,41 @@ func Load() (Config, error) {
 			SpreadsheetID:   strings.TrimSpace(os.Getenv("GOOGLE_SHEETS_SPREADSHEET_ID")),
 			CatalogRange:    envOrDefault("GOOGLE_SHEETS_CATALOG_RANGE", "A1:Z10000"),
 		},
+		Storage:  storage,
 		LogLevel: logLevel,
 	}, nil
+}
+
+func storageConfig(environment string) (StorageConfig, error) {
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_PROVIDER")))
+	switch provider {
+	case "", "local":
+		provider = "local"
+	case "r2":
+	default:
+		return StorageConfig{}, fmt.Errorf("STORAGE_PROVIDER must be local or r2")
+	}
+
+	cfg := StorageConfig{
+		Provider: provider,
+		LocalDir: envOrDefault("STORAGE_LOCAL_DIR", "./uploads"),
+	}
+
+	if provider == "r2" {
+		cfg.R2Endpoint = strings.TrimRight(strings.TrimSpace(os.Getenv("R2_ENDPOINT")), "/")
+		cfg.R2Bucket = strings.TrimSpace(os.Getenv("R2_BUCKET"))
+		cfg.R2AccessKeyID = strings.TrimSpace(os.Getenv("R2_ACCESS_KEY_ID"))
+		cfg.R2SecretKey = strings.TrimSpace(os.Getenv("R2_SECRET_KEY"))
+		cfg.R2Region = strings.TrimSpace(os.Getenv("R2_REGION"))
+		if cfg.R2Endpoint == "" || cfg.R2Bucket == "" || cfg.R2AccessKeyID == "" || cfg.R2SecretKey == "" {
+			return StorageConfig{}, fmt.Errorf("R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_KEY are required when STORAGE_PROVIDER=r2")
+		}
+		if cfg.R2Region == "" {
+			cfg.R2Region = "auto"
+		}
+	}
+
+	return cfg, nil
 }
 
 func authConfig(environment string, corsOrigins []string) (AuthConfig, error) {

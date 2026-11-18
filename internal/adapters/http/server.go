@@ -70,7 +70,8 @@ func NewHandlerWithPayments(
 ) http.Handler {
 	return newHandlerWithEstimates(
 		health, allowedOrigins, authService, clientService, technicianService,
-		serviceService, paymentService, nil, nil, nil, nil, nil, nil, nil, authConfig, logger, idempotency...,
+		serviceService, paymentService, nil, nil, nil, nil, nil, nil, nil, nil,
+		config.StorageConfig{}, nil, authConfig, logger, idempotency...,
 	)
 }
 
@@ -89,7 +90,8 @@ func NewHandlerWithEstimates(
 ) http.Handler {
 	return newHandlerWithEstimates(
 		health, allowedOrigins, authService, clientService, technicianService,
-		serviceService, paymentService, estimateService, nil, nil, nil, nil, nil, nil, authConfig, logger, idempotency...,
+		serviceService, paymentService, estimateService, nil, nil, nil, nil, nil, nil, nil,
+		config.StorageConfig{}, nil, authConfig, logger, idempotency...,
 	)
 }
 
@@ -109,7 +111,9 @@ func NewHandlerWithServiceParts(
 ) http.Handler {
 	return newHandlerWithEstimates(
 		health, allowedOrigins, authService, clientService, technicianService,
-		serviceService, paymentService, estimateService, servicePartService, nil, nil, nil, nil, nil, authConfig, logger, idempotency...,
+		serviceService, paymentService, estimateService, servicePartService,
+		nil, nil, nil, nil, nil, nil,
+		config.StorageConfig{}, nil, authConfig, logger, idempotency...,
 	)
 }
 
@@ -132,7 +136,8 @@ func NewHandlerWithPhase6(
 	return newHandlerWithEstimates(
 		health, allowedOrigins, authService, clientService, technicianService,
 		serviceService, paymentService, estimateService, servicePartService,
-		expenseService, catalogService, nil, nil, nil, authConfig, logger, idempotency...,
+		expenseService, catalogService, nil, nil, nil, nil,
+		config.StorageConfig{}, nil, authConfig, logger, idempotency...,
 	)
 }
 
@@ -159,7 +164,37 @@ func NewHandlerWithPhase6Complete(
 		health, allowedOrigins, authService, clientService, technicianService,
 		serviceService, paymentService, estimateService, servicePartService,
 		expenseService, catalogService, catalogAdminService, catalogImportService, settlementService,
-		authConfig, logger, idempotency...,
+		nil, config.StorageConfig{}, nil, authConfig, logger, idempotency...,
+	)
+}
+
+func NewHandlerWithPhase7(
+	health HealthChecker,
+	allowedOrigins []string,
+	authService authUseCases,
+	clientService clientUseCases,
+	technicianService technicianUseCases,
+	serviceService serviceUseCases,
+	paymentService paymentUseCases,
+	estimateService estimateUseCases,
+	servicePartService servicePartUseCases,
+	expenseService expenseUseCases,
+	catalogService catalogUseCases,
+	catalogAdminService catalogAdminUseCases,
+	catalogImportService catalogImportUseCases,
+	settlementService settlementUseCases,
+	storageService storageUseCases,
+	storageCfg config.StorageConfig,
+	fileStore outbound.FileStore,
+	authConfig config.AuthConfig,
+	logger *slog.Logger,
+	idempotency ...outbound.IdempotencyRepository,
+) http.Handler {
+	return newHandlerWithEstimates(
+		health, allowedOrigins, authService, clientService, technicianService,
+		serviceService, paymentService, estimateService, servicePartService,
+		expenseService, catalogService, catalogAdminService, catalogImportService, settlementService,
+		storageService, storageCfg, fileStore, authConfig, logger, idempotency...,
 	)
 }
 
@@ -176,7 +211,8 @@ func newHandler(
 ) http.Handler {
 	return newHandlerWithEstimates(
 		health, allowedOrigins, authService, clientService, technicianService,
-		serviceService, nil, nil, nil, nil, nil, nil, nil, nil, authConfig, logger, idempotency...,
+		serviceService, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, config.StorageConfig{}, nil, authConfig, logger, idempotency...,
 	)
 }
 
@@ -195,6 +231,9 @@ func newHandlerWithEstimates(
 	catalogAdminService catalogAdminUseCases,
 	catalogImportService catalogImportUseCases,
 	settlementService settlementUseCases,
+	storageService storageUseCases,
+	storageCfg config.StorageConfig,
+	fileStore outbound.FileStore,
 	authConfig config.AuthConfig,
 	logger *slog.Logger,
 	idempotency ...outbound.IdempotencyRepository,
@@ -250,6 +289,9 @@ func newHandlerWithEstimates(
 		importHandler := NewCatalogImportHandler(authService, catalogImportService, authConfig, logger, idempotencyRepository)
 		mux.Handle("/api/v1/catalog/import", importHandler)
 		mux.Handle("/api/v1/integrations/google-sheets/catalog-import", importHandler)
+	}
+	if storageService != nil {
+		registerStorageRoutes(mux, authService, storageService, authConfig, storageCfg, logger, fileStore, idempotencyRepository)
 	}
 	if settlementService != nil {
 		handler := NewSettlementHandler(authService, settlementService, authConfig, logger, idempotencyRepository)
