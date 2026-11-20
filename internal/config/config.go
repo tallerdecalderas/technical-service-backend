@@ -56,6 +56,7 @@ type AuthConfig struct {
 }
 
 func Load() (Config, error) {
+	loadDotEnv(".env")
 	environment := envOrDefault("APP_ENV", "development")
 	switch environment {
 	case "development", "test", "staging", "production":
@@ -363,4 +364,33 @@ func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
 		return 0, fmt.Errorf("%s must be a duration", key)
 	}
 	return value, nil
+}
+
+func loadDotEnv(filepath string) {
+	data, err := os.ReadFile(filepath)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if (strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"")) ||
+			(strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'")) {
+			if len(val) >= 2 {
+				val = val[1 : len(val)-1]
+			}
+		}
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, val)
+		}
+	}
 }
