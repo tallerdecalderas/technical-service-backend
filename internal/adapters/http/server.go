@@ -478,12 +478,13 @@ func (w *statusRecorder) Unwrap() http.ResponseWriter {
 
 func corsMiddleware(allowedOrigins map[string]struct{}, next http.Handler) http.Handler {
 	const allowedMethods = "GET, POST, PATCH, DELETE, OPTIONS"
-	const allowedHeaders = "Content-Type, Idempotency-Key, X-CSRF-Token, X-Request-ID"
+	const allowedHeaders = "Content-Type, Idempotency-Key, X-CSRF-Token, X-Request-ID, Accept"
 	headers := map[string]struct{}{
 		"content-type":    {},
 		"idempotency-key": {},
 		"x-csrf-token":    {},
 		"x-request-id":    {},
+		"accept":          {},
 	}
 	methods := map[string]struct{}{
 		http.MethodGet:     {},
