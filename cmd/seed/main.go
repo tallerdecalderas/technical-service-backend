@@ -7,14 +7,17 @@
 // Usage:
 //
 //	go run ./cmd/seed \
-//	  -name  "Admin"                \
-//	  -email "tallerdecalderasok@gmail.com"     \
-//	  -pass  "MiPassword123!"       \
-//	  -company "Taller de calderas"          \
-//	  -role  ADMIN
+//	  -name "Admin" \
+//	  -email "admin@example.com" \
+//	  -pass "una-contraseña-segura" \
+//	  -company "Taller de calderas" \
+//	  -role ADMIN
 //
 // Additional technicians can be created under the same company with -technician
-// (repeatable). A bare `go run ./cmd/seed` works with all defaults.
+// (repeat the flag). Use -skip-primary to add technicians without also
+// provisioning the primary admin. Set SUPABASE_AUTH_ADMIN_KEY to a secret API
+// key before running this command; SUPABASE_AUTH_API_KEY remains the publishable
+// key used for password-grant verification.
 //
 // At the end, with -verify, it attempts a real Supabase password grant
 // (auth/v1/token?grant_type=password) to confirm you can log in.
@@ -24,11 +27,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -47,13 +52,28 @@ type technician struct {
 	authID string // filled after Supabase Auth creation
 }
 
+type stringList []string
+
+func (s *stringList) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stringList) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
+var errSupabaseUserAlreadyExists = errors.New("Supabase Auth user already exists")
+
 func main() {
 	name := flag.String("name", "Admin", "Nombre del usuario principal")
 	email := flag.String("email", "tallerdecalderasok@gmail.com", "Email (credencial de login)")
-	password := flag.String("pass", "Admin123!", "Contraseña (mín 6 chars)")
+	password := flag.String("pass", "", "Contraseña (mín 6 chars)")
 	companyName := flag.String("company", "Taller de calderas", "Nombre de la empresa")
 	role := flag.String("role", "ADMIN", "Rol: ADMIN o TECHNICIAN")
-	technicians := flag.String("technician", "", "Técnico adicional: nombre,email,contraseña (se puede repetir)")
+	skipPrimary := flag.Bool("skip-primary", false, "No crear/actualizar el usuario principal; usar con -technician")
+	var technicians stringList
+	flag.Var(&technicians, "technician", "Técnico adicional: nombre,email,contraseña (repetible)")
 	verify := flag.Bool("verify", false, "Al final, intenta un login real con Supabase para validar credenciales")
 	flag.Parse()
 
@@ -61,27 +81,37 @@ func main() {
 	if *role != "ADMIN" && *role != "TECHNICIAN" {
 		log.Fatal("❌ -role debe ser ADMIN o TECHNICIAN")
 	}
-	if len(*password) < 6 {
-		log.Fatal("❌ -pass debe tener al menos 6 caracteres")
+	if strings.TrimSpace(*companyName) == "" {
+		log.Fatal("❌ -company no puede estar vacío")
 	}
+	*companyName = strings.TrimSpace(*companyName)
 
 	// Build the list of users to provision: principal first, then additional technicians.
-	users := []technician{
-		{name: *name, email: *email, pass: *password, role: *role},
-	}
-	for _, raw := range strings.Split(*technicians, ",") {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
+	users := make([]technician, 0, len(technicians)+1)
+	if !*skipPrimary {
+		if strings.TrimSpace(*name) == "" || strings.TrimSpace(*email) == "" {
+			log.Fatal("❌ -name y -email no pueden estar vacíos")
 		}
+		if len(*password) < 6 {
+			log.Fatal("❌ -pass es obligatorio y debe tener al menos 6 caracteres")
+		}
+		*name = strings.TrimSpace(*name)
+		*email = strings.ToLower(strings.TrimSpace(*email))
+		users = append(users, technician{name: *name, email: *email, pass: *password, role: *role})
+	}
+	if *skipPrimary && len(technicians) == 0 {
+		log.Fatal("❌ -skip-primary requiere al menos un -technician")
+	}
+	for _, raw := range technicians {
+		raw = strings.TrimSpace(raw)
 		parts := strings.SplitN(raw, ",", 3)
 		if len(parts) != 3 {
 			log.Fatalf("❌ -technician debe ser 'nombre,email,contraseña', recibí: %q", raw)
 		}
 		t := technician{
 			name:  strings.TrimSpace(parts[0]),
-			email: strings.TrimSpace(parts[1]),
-			pass:  strings.TrimSpace(parts[2]),
+			email: strings.ToLower(strings.TrimSpace(parts[1])),
+			pass:  parts[2],
 			role:  "TECHNICIAN",
 		}
 		if t.name == "" || t.email == "" || len(t.pass) < 6 {
@@ -89,10 +119,17 @@ func main() {
 		}
 		users = append(users, t)
 	}
+	if len(users) == 0 {
+		log.Fatal("❌ no hay usuarios para aprovisionar")
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("❌ Error cargando configuración: %v", err)
+	}
+	adminAPIKey, err := supabaseAdminAPIKeyFromEnvironment()
+	if err != nil {
+		log.Fatalf("❌ Error de configuración para crear usuarios: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -110,7 +147,7 @@ func main() {
 	fmt.Println("🔐 Paso 1/N: Creando identidades en Supabase Auth...")
 	for i := range users {
 		u := &users[i]
-		authUID, err := ensureSupabaseUser(ctx, cfg.Auth.SupabaseURL, cfg.Auth.SupabaseAPIKey, httpClient, u.email, u.pass)
+		authUID, err := ensureSupabaseUser(ctx, cfg.Auth.SupabaseURL, adminAPIKey, httpClient, u.email, u.pass)
 		if err != nil {
 			log.Fatalf("❌ Error en Supabase Auth para %s: %v", u.email, err)
 		}
@@ -140,7 +177,11 @@ func main() {
 	var companyID string
 	err = tx.QueryRow(ctx, `select id::text from public.company where name = $1 limit 1`, *companyName).Scan(&companyID)
 	if err != nil {
-		err = tx.QueryRow(ctx, `insert into public.company (name, "isActive") values ($1, true) returning id::text`, *companyName).Scan(&companyID)
+		err = tx.QueryRow(ctx, `
+			insert into public.company (id, name, "isActive")
+			values (gen_random_uuid(), $1, true)
+			returning id::text
+		`, *companyName).Scan(&companyID)
 		if err != nil {
 			log.Fatalf("❌ Error creando empresa: %v", err)
 		}
@@ -190,8 +231,7 @@ func main() {
 		_, err = tx.Exec(ctx, `
 			insert into public.user_identities (user_id, provider, provider_subject, active)
 			values ($1::uuid, 'supabase', $2, true)
-			on conflict (user_id, provider) do update set
-				provider_subject = excluded.provider_subject,
+			on conflict (provider, provider_subject) do update set
 				active = true
 		`, userID, u.authID)
 		if err != nil {
@@ -232,31 +272,75 @@ func main() {
 	} else {
 		fmt.Println("  Usá -verify para probar un login real con Supabase.")
 		fmt.Println()
-		fmt.Printf("  Email de prueba: %s\n", users[0].email)
-		fmt.Printf("  Contraseña:      %s\n", users[0].pass)
-		fmt.Println("  Ya podés iniciar sesión en el frontend 🚀")
+		if !*skipPrimary {
+			fmt.Printf("  Email de prueba: %s\n", users[0].email)
+		}
+		fmt.Println("  La contraseña no se muestra por seguridad.")
 	}
 }
 
-// ensureSupabaseUser creates a user in Supabase Auth using the service_role key.
+func supabaseAdminAPIKeyFromEnvironment() (string, error) {
+	for _, name := range []string{"SUPABASE_AUTH_ADMIN_KEY", "SUPABASE_SECRET_KEY"} {
+		if key := strings.TrimSpace(os.Getenv(name)); key != "" {
+			return key, nil
+		}
+	}
+
+	// Keep compatibility with the key name already present in some local .env files.
+	if raw := strings.TrimSpace(os.Getenv("SUPABASE_SECRET_KEYS")); raw != "" {
+		if strings.HasPrefix(raw, "{") {
+			var keys map[string]string
+			if err := json.Unmarshal([]byte(raw), &keys); err != nil {
+				return "", fmt.Errorf("SUPABASE_SECRET_KEYS no contiene un JSON válido")
+			}
+			if key := strings.TrimSpace(keys["default"]); key != "" {
+				return key, nil
+			}
+			if len(keys) == 1 {
+				for _, key := range keys {
+					if strings.TrimSpace(key) != "" {
+						return strings.TrimSpace(key), nil
+					}
+				}
+			}
+			return "", fmt.Errorf("configurá SUPABASE_AUTH_ADMIN_KEY para elegir una clave secreta")
+		}
+		return raw, nil
+	}
+
+	if key := strings.TrimSpace(os.Getenv("SUPABASE_SERVICE_ROLE_KEY")); key != "" {
+		return key, nil
+	}
+
+	return "", fmt.Errorf("falta SUPABASE_AUTH_ADMIN_KEY (clave secreta de Supabase; no uses la publishable)")
+}
+
+// ensureSupabaseUser creates a user in Supabase Auth using a server-only key.
 // Idempotent: if the email already exists, it looks up the existing auth UUID
 // from the admin list endpoint so the command can be re-run safely.
 func ensureSupabaseUser(ctx context.Context, supabaseURL, apiKey string, client *http.Client, email, password string) (string, error) {
 	// Try creating with the admin endpoint (auto-confirms the user).
-	authUID, err := createSupabaseUser(ctx, supabaseURL, apiKey, email, password)
+	authUID, err := createSupabaseUser(ctx, supabaseURL, apiKey, client, email, password)
 	if err == nil {
 		return authUID, nil
 	}
 	// If it already exists, fetch the existing UUID by email.
-	if !strings.Contains(err.Error(), "ya existe en Supabase Auth") {
+	if !errors.Is(err, errSupabaseUserAlreadyExists) {
 		return "", err
 	}
 	return lookupSupabaseUserByEmail(ctx, supabaseURL, apiKey, client, email)
 }
 
-// createSupabaseUser calls Supabase Auth Admin API to create a new user.
-// It uses the service_role key (apiKey) to bypass email confirmation.
-func createSupabaseUser(ctx context.Context, supabaseURL, apiKey, email, password string) (string, error) {
+func setSupabaseAdminHeaders(req *http.Request, apiKey string) {
+	req.Header.Set("apikey", apiKey)
+	// The modern sb_secret key is not a JWT and must not be sent as a bearer token.
+	if !strings.HasPrefix(apiKey, "sb_secret_") {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+}
+
+// createSupabaseUser calls Supabase Auth Admin API to create a confirmed user.
+func createSupabaseUser(ctx context.Context, supabaseURL, apiKey string, client *http.Client, email, password string) (string, error) {
 	payload, err := json.Marshal(map[string]interface{}{
 		"email":         email,
 		"password":      password,
@@ -271,11 +355,9 @@ func createSupabaseUser(ctx context.Context, supabaseURL, apiKey, email, passwor
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("apikey", apiKey)
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	setSupabaseAdminHeaders(req, apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("sending request: %w", err)
@@ -284,14 +366,12 @@ func createSupabaseUser(ctx context.Context, supabaseURL, apiKey, email, passwor
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
-	if resp.StatusCode == http.StatusUnprocessableEntity || resp.StatusCode == http.StatusConflict {
-		return "", fmt.Errorf("el email '%s' ya existe en Supabase Auth.\n"+
-			"Si querés recrearlo, eliminalo primero desde el dashboard de Supabase → Authentication → Users", email)
+	if resp.StatusCode == http.StatusConflict || (resp.StatusCode == http.StatusUnprocessableEntity && isDuplicateUserError(body)) {
+		return "", fmt.Errorf("%w: %s", errSupabaseUserAlreadyExists, email)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("Supabase Auth respondió HTTP %d: %s\n\n"+
-			"💡 Asegurate de que SUPABASE_AUTH_API_KEY sea la service_role key (no la anon key).\n"+
-			"   La encontrás en: Supabase Dashboard → Settings → API → service_role", resp.StatusCode, string(body))
+		return "", fmt.Errorf("Supabase Auth respondió HTTP %d: %s\n"+
+			"Verificá que SUPABASE_AUTH_ADMIN_KEY sea una clave secreta del mismo proyecto que SUPABASE_URL", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -303,40 +383,58 @@ func createSupabaseUser(ctx context.Context, supabaseURL, apiKey, email, passwor
 	return result.ID, nil
 }
 
+func isDuplicateUserError(body []byte) bool {
+	lowerBody := strings.ToLower(string(body))
+	return strings.Contains(lowerBody, "user_already_exists") ||
+		strings.Contains(lowerBody, "email_exists") ||
+		strings.Contains(lowerBody, "already registered") ||
+		strings.Contains(lowerBody, "already exists")
+}
+
 // lookupSupabaseUserByEmail lists admin users and returns the UUID matching email.
 func lookupSupabaseUserByEmail(ctx context.Context, supabaseURL, apiKey string, client *http.Client, email string) (string, error) {
-	endpoint := strings.TrimRight(supabaseURL, "/") + "/auth/v1/admin/users"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("apikey", apiKey)
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	baseURL := strings.TrimRight(supabaseURL, "/") + "/auth/v1/admin/users"
+	for page := 1; ; page++ {
+		query := url.Values{}
+		query.Set("page", fmt.Sprint(page))
+		query.Set("per_page", "1000")
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"?"+query.Encode(), nil)
+		if err != nil {
+			return "", fmt.Errorf("creating request: %w", err)
+		}
+		setSupabaseAdminHeaders(req, apiKey)
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("sending request: %w", err)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			_ = resp.Body.Close()
+			return "", fmt.Errorf("Supabase Auth respondió HTTP %d al buscar el usuario: %s", resp.StatusCode, string(body))
+		}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return "", fmt.Errorf("Supabase Auth respondió HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var list []struct {
-		ID    string `json:"id"`
-		Email string `json:"email"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&list); err != nil {
-		return "", fmt.Errorf("decoding users list: %w", err)
-	}
-	for _, u := range list {
-		if strings.EqualFold(u.Email, email) {
-			return u.ID, nil
+		var result struct {
+			Users []struct {
+				ID    string `json:"id"`
+				Email string `json:"email"`
+			} `json:"users"`
+		}
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&result)
+		_ = resp.Body.Close()
+		if decodeErr != nil {
+			return "", fmt.Errorf("decoding users list: %w", decodeErr)
+		}
+		for _, user := range result.Users {
+			if strings.EqualFold(user.Email, email) {
+				return user.ID, nil
+			}
+		}
+		if len(result.Users) < 1000 {
+			break
 		}
 	}
-	return "", fmt.Errorf("el email '%s' existe en Supabase Auth pero no se pudo obtener su UUID", email)
+	return "", fmt.Errorf("el email '%s' ya existe, pero no se pudo obtener su UUID", email)
 }
 
 // IdentityTokens mirrors outbound.IdentityTokens without importing the app layer.
@@ -390,15 +488,5 @@ func supabaseAuthenticate(ctx context.Context, supabaseURL, apiKey string, clien
 }
 
 func init() {
-	// Suppress default log prefix
 	log.SetFlags(0)
-
-	// Warn if SUPABASE_AUTH_API_KEY looks like the anon key; we need service_role
-	if key := os.Getenv("SUPABASE_AUTH_API_KEY"); key != "" && len(key) < 100 {
-		fmt.Println()
-		fmt.Println("⚠️  SUPABASE_AUTH_API_KEY parece ser la anon key (es muy corta).")
-		fmt.Println("   Este comando necesita la service_role key para crear usuarios.")
-		fmt.Println("   Encontrala en: Supabase Dashboard → Settings → API → service_role")
-		fmt.Println()
-	}
 }

@@ -5,3 +5,4 @@
 /bin/
 /coverage/
 /tmp/
+technical-service-backend/cmd/seed/main.go
