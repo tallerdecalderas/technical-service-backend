@@ -287,7 +287,7 @@ func newHandlerWithEstimates(
 		mux.Handle("/api/v1/auth/", NewAuthHandler(authService, authConfig, logger))
 	}
 	if companyService != nil {
-		mux.Handle("/api/v1/companies", NewCompanyHandler(authService, companyService, authConfig, logger))
+		mux.Handle("/api/v1/companies", NewCompanyHandler(authService, companyService, authConfig, logger, idempotencyRepository))
 	}
 	if clientService != nil {
 		handler := NewClientHandler(authService, clientService, authConfig, logger, idempotencyRepository)
