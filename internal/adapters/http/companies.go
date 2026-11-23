@@ -62,13 +62,15 @@ type companyCreateRequest struct {
 	Name    string `json:"name"`
 	Address string `json:"address,omitempty"`
 	Phone   string `json:"phone,omitempty"`
+	Avatar  string `json:"avatar,omitempty"`
 }
 
 type companyUpdateRequest struct {
-	Name    *string `json:"name,omitempty"`
-	Address *string `json:"address,omitempty"`
-	Phone   *string `json:"phone,omitempty"`
-	IsActive *bool  `json:"isActive,omitempty"`
+	Name     *string `json:"name,omitempty"`
+	Address  *string `json:"address,omitempty"`
+	Phone    *string `json:"phone,omitempty"`
+	IsActive *bool   `json:"isActive,omitempty"`
+	Avatar   *string `json:"avatar,omitempty"`
 }
 
 type companyResponse struct {
@@ -77,6 +79,7 @@ type companyResponse struct {
 	IsActive  bool      `json:"isActive"`
 	Address   string    `json:"address,omitempty"`
 	Phone     string    `json:"phone,omitempty"`
+	Avatar    string    `json:"avatar,omitempty"`
 	CreatedAt time.Time `json:"createdAt,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt,omitempty"`
 }
@@ -106,7 +109,7 @@ func (h *companyHandler) list(w http.ResponseWriter, r *http.Request) {
 
 	response := make([]companyResponse, 0, len(companies))
 	for _, company := range companies {
-		response = append(response, companyResponse{ID: company.ID, Name: company.Name})
+		response = append(response, companyResponse{ID: company.ID, Name: company.Name, Avatar: company.Avatar})
 	}
 	writeJSON(h.logger, w, http.StatusOK, map[string]any{"data": response})
 }
@@ -130,6 +133,7 @@ func (h *companyHandler) create(w http.ResponseWriter, r *http.Request) {
 		Name:    body.Name,
 		Address: body.Address,
 		Phone:   body.Phone,
+		Avatar:  body.Avatar,
 	})
 	if err != nil {
 		switch {
@@ -172,6 +176,7 @@ func (h *companyHandler) update(w http.ResponseWriter, r *http.Request) {
 		Address:  body.Address,
 		Phone:    body.Phone,
 		IsActive: body.IsActive,
+		Avatar:   body.Avatar,
 	})
 	if err != nil {
 		switch {
@@ -187,7 +192,7 @@ func (h *companyHandler) update(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(h.logger, w, http.StatusOK, map[string]any{"data": companyResponse{ID: summary.ID, Name: summary.Name}})
+	writeJSON(h.logger, w, http.StatusOK, map[string]any{"data": companyResponse{ID: summary.ID, Name: summary.Name, Avatar: summary.Avatar}})
 }
 
 func (h *companyHandler) deactivate(w http.ResponseWriter, r *http.Request) {

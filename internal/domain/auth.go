@@ -1,17 +1,21 @@
 package domain
 
-import "time"
+import (
+	"time"
+)
 
 type User struct {
-	ID         string
-	Email      string
-	Name       string
-	Role       string
-	Avatar     string
-	Phone      string
-	DNI        string
-	Active     bool
-	CompanyIDs []string `json:"-"`
+	ID          string
+	Email       string
+	Name        string
+	Role        string
+	Avatar      string
+	Phone       string
+	DNI         string
+	Active      bool
+	CompanyIDs  []string `json:"-"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type CompanyMembership struct {

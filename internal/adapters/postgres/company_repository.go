@@ -54,7 +54,7 @@ order by lower(c.name), c.id
 	companies := make([]domain.CompanySummary, 0)
 	for rows.Next() {
 		var company domain.CompanySummary
-		if err := rows.Scan(&company.ID, &company.Name); err != nil {
+		if err := rows.Scan(&company.ID, &company.Name, &company.Avatar); err != nil {
 			return nil, fmt.Errorf("scan authorized company: %w", err)
 		}
 		companies = append(companies, company)
@@ -71,10 +71,10 @@ func (r *CompanyRepository) CreateCompany(ctx context.Context, input domain.Comp
 
 	var id string
 	if err := r.db.QueryRow(queryCtx, `
-insert into public."company" (name, "isActive", address, phone)
-values ($1, true, $2, $3)
+insert into public."company" (name, "isActive", address, phone, avatar)
+values ($1, true, $2, $3, $4)
 returning id::text
-`, input.Name, input.Address, input.Phone).Scan(&id); err != nil {
+`, input.Name, input.Address, input.Phone, input.Avatar).Scan(&id); err != nil {
 		return "", fmt.Errorf("create company: %w", err)
 	}
 	return id, nil
@@ -125,10 +125,11 @@ update public."company"
 set name = coalesce($2, name),
     address = coalesce($3, address),
     phone = coalesce($4, phone),
-    "isActive" = coalesce($5, "isActive"),
+    avatar = coalesce($5, avatar),
+    "isActive" = coalesce($6, "isActive"),
     "updatedAt" = now()
 where id::text = $1
-`, id, input.Name, input.Address, input.Phone, input.IsActive)
+`, id, input.Name, input.Address, input.Phone, input.Avatar, input.IsActive)
 	if err != nil {
 		return fmt.Errorf("update company: %w", err)
 	}

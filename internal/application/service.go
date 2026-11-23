@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/crypto/bcrypt"
 	"technical-service-backend/internal/domain"
 	"technical-service-backend/internal/ports/outbound"
 )
@@ -317,4 +318,13 @@ func containsString(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// BcryptGenerate hashes a password using bcrypt with the default cost.
+func BcryptGenerate(password string) (string, error) {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hashed), nil
 }
