@@ -68,7 +68,7 @@ var errSupabaseUserAlreadyExists = errors.New("Supabase Auth user already exists
 func main() {
 	name := flag.String("name", "Admin", "Nombre del usuario principal")
 	email := flag.String("email", "tallerdecalderasok@gmail.com", "Email (credencial de login)")
-	password := flag.String("pass", "", "Contraseña (mín 6 chars)")
+	password := flag.String("pass", "admin123!", "Contraseña (mín 6 chars)")
 	companyName := flag.String("company", "Taller de calderas", "Nombre de la empresa")
 	role := flag.String("role", "ADMIN", "Rol: ADMIN o TECHNICIAN")
 	skipPrimary := flag.Bool("skip-primary", false, "No crear/actualizar el usuario principal; usar con -technician")

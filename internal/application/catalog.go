@@ -26,10 +26,11 @@ type CatalogUseCases struct {
 }
 
 type CatalogListInput struct {
-	CompanyID string
-	Search    string
-	Page      int
-	PageSize  int
+	CompanyID       string
+	Search          string
+	IncludeInactive bool
+	Page            int
+	PageSize        int
 }
 
 func NewCatalogUseCases(repository outbound.CatalogRepository) *CatalogUseCases {
@@ -42,6 +43,9 @@ func (s *CatalogUseCases) ListPrices(ctx context.Context, user domain.User, inpu
 		return domain.CatalogPage{}, ErrCatalogForbidden
 	}
 	if actor.Role != "ADMIN" && actor.Role != "TECHNICIAN" {
+		return domain.CatalogPage{}, ErrCatalogForbidden
+	}
+	if input.IncludeInactive && actor.Role != "ADMIN" {
 		return domain.CatalogPage{}, ErrCatalogForbidden
 	}
 	page, pageSize := input.Page, input.PageSize
@@ -66,7 +70,8 @@ func (s *CatalogUseCases) ListPrices(ctx context.Context, user domain.User, inpu
 		}
 	}
 	result, err := s.repository.ListCatalogPrices(ctx, domain.CatalogFilter{
-		Actor: actor, CompanyID: input.CompanyID, Search: search, Page: page, PageSize: pageSize,
+		Actor: actor, CompanyID: input.CompanyID, Search: search,
+		IncludeInactive: input.IncludeInactive, Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		return domain.CatalogPage{}, err

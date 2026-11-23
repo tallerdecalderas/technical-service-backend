@@ -56,6 +56,8 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	authService := application.NewAuthService(identityProvider, authRepository, cfg.Auth.SessionTTL)
 	clientRepository := postgres.NewClientRepository(pool, cfg.DatabaseQueryTimeout)
 	clientService := application.NewClientUseCases(clientRepository)
+	companyRepository := postgres.NewCompanyRepository(pool, cfg.DatabaseQueryTimeout)
+	companyService := application.NewCompanyUseCases(companyRepository)
 	technicianRepository := postgres.NewTechnicianRepository(pool, cfg.DatabaseQueryTimeout)
 	technicianService := application.NewTechnicianUseCases(technicianRepository, identityProvider)
 	serviceRepository := postgres.NewServiceRepository(pool, cfg.DatabaseQueryTimeout)
@@ -103,13 +105,13 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	storedObjectRepository := postgres.NewStoredObjectRepository(pool, cfg.DatabaseQueryTimeout)
 	storageSvc := application.NewStorageUseCases(storageAdapter, storedObjectRepository, logger)
 
-	handler := httpadapter.NewHandlerWithPhase7(
+	handler := httpadapter.NewHandlerWithPhase7AndCompanies(
 		pool, cfg.CORSAllowedOrigins, authService, clientService, technicianService,
 		serviceService, paymentService, estimateService, servicePartService,
 		expenseService, catalogService, catalogAdminService, catalogImportService, settlementService,
 		storageSvc, cfg.Storage,
 		fileStore,
-		cfg.Auth, logger, idempotencyRepository,
+		cfg.Auth, logger, companyService, idempotencyRepository,
 	)
 	server := httpadapter.NewServer(cfg.APIPort, handler)
 	return httpadapter.Serve(ctx, server, logger)

@@ -33,14 +33,14 @@ func (r *CatalogRepository) ListCatalogPrices(ctx context.Context, filter domain
 
 	const predicate = `i."companyId"::text = any($1::text[])
   and ($2 = '' or i."companyId"::text = $2)
-  and i."isActive"
+  and ($4::boolean or i."isActive")
   and ($3 = '' or i.name ilike '%' || $3 || '%' or i.code ilike '%' || $3 || '%')`
 
 	var total int
 	if err := r.db.QueryRow(queryCtx, `
 select count(*)
 from public."inventoryItem" as i
-where `+predicate, filter.Actor.CompanyIDs, filter.CompanyID, filter.Search).Scan(&total); err != nil {
+where `+predicate, filter.Actor.CompanyIDs, filter.CompanyID, filter.Search, filter.IncludeInactive).Scan(&total); err != nil {
 		return domain.CatalogPage{}, fmt.Errorf("count catalog prices: %w", err)
 	}
 
@@ -52,8 +52,8 @@ from public."inventoryItem" as i
 join public."company" as c on c.id = i."companyId"
 where `+predicate+`
 order by i.name asc, i.code asc, i.id asc
-limit $4 offset $5
-`, filter.Actor.CompanyIDs, filter.CompanyID, filter.Search, filter.PageSize, (filter.Page-1)*filter.PageSize)
+limit $5 offset $6
+`, filter.Actor.CompanyIDs, filter.CompanyID, filter.Search, filter.IncludeInactive, filter.PageSize, (filter.Page-1)*filter.PageSize)
 	if err != nil {
 		return domain.CatalogPage{}, fmt.Errorf("query catalog prices: %w", err)
 	}
@@ -90,8 +90,8 @@ select coalesce(max(i."updatedAt"), 'epoch'::timestamptz), count(*)
 from public."inventoryItem" as i
 where i."companyId"::text = any($1::text[])
   and ($2 = '' or i."companyId"::text = $2)
-  and i."isActive"
-`, filter.Actor.CompanyIDs, filter.CompanyID).Scan(&updatedAt, &count); err != nil {
+  and ($3::boolean or i."isActive")
+`, filter.Actor.CompanyIDs, filter.CompanyID, filter.IncludeInactive).Scan(&updatedAt, &count); err != nil {
 		return "", time.Time{}, fmt.Errorf("read catalog version: %w", err)
 	}
 	updatedAt = updatedAt.UTC()

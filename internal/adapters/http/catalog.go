@@ -39,9 +39,17 @@ func (h *catalogHandler) list(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := rejectUnknownQuery(r.URL.Query(), []string{"companyId", "search", "page", "pageSize"}); err != nil {
+	if err := rejectUnknownQuery(r.URL.Query(), []string{"companyId", "search", "page", "pageSize", "includeInactive"}); err != nil {
 		writeResourceError(h.logger, w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Revisá los filtros enviados.")
 		return
+	}
+	includeInactive := false
+	if values, present := r.URL.Query()["includeInactive"]; present {
+		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+			writeResourceError(h.logger, w, r, http.StatusBadRequest, "VALIDATION_ERROR", "Revisá los filtros enviados.")
+			return
+		}
+		includeInactive = values[0] == "true"
 	}
 	page, pageSize, err := paginationQuery(r.URL.Query())
 	if err != nil {
@@ -51,10 +59,11 @@ func (h *catalogHandler) list(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	result, err := h.service.ListPrices(ctx, session.User, application.CatalogListInput{
-		CompanyID: r.URL.Query().Get("companyId"),
-		Search:    r.URL.Query().Get("search"),
-		Page:      page,
-		PageSize:  pageSize,
+		CompanyID:       r.URL.Query().Get("companyId"),
+		Search:          r.URL.Query().Get("search"),
+		IncludeInactive: includeInactive,
+		Page:            page,
+		PageSize:        pageSize,
 	})
 	if err != nil {
 		h.writeError(w, r, err)

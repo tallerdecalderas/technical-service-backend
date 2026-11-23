@@ -19,11 +19,12 @@ type CatalogPrice struct {
 }
 
 type CatalogFilter struct {
-	Actor     ServiceActor
-	CompanyID string
-	Search    string
-	Page      int
-	PageSize  int
+	Actor           ServiceActor
+	CompanyID       string
+	Search          string
+	IncludeInactive bool
+	Page            int
+	PageSize        int
 }
 
 type CatalogPage struct {
